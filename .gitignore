@@ -4,3 +4,10 @@
 
 # VS Code
 .vscode/
+
+# Documentation
+docs.md
+
+# Python
+__pycache__/
+*.py[cod]
