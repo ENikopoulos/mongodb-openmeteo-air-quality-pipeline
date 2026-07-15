@@ -1,0 +1,16 @@
+[
+  {
+    "city_id": 1,
+    "city": "Athens",
+    "country": "Greece",
+    "latitude": 37.9838,
+    "longitude": 23.7275
+  },
+  {
+    "city_id": 2,
+    "city": "Thessaloniki",
+    "country": "Greece",
+    "latitude": 40.6401,
+    "longitude": 22.9444
+  }
+]

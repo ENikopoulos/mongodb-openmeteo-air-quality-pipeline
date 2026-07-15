@@ -9,6 +9,7 @@ import os
 from dotenv import load_dotenv
 import time
 from urllib.error import HTTPError, URLError
+from pathlib import Path
 
 # API configuration
 AIR_QUALITY_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
@@ -34,25 +35,33 @@ INGESTION_RUNS_COLLECTION_NAME = "ingestion_runs"
 MAX_ATTEMPTS = 3
 RETRY_DELAY_SECONDS = 2
 
-# Cities list
-CITIES = [
-    {
-        "city_id": 1,
-        "city": "Athens",
-        "country": "Greece",
-        "latitude": 37.9838,
-        "longitude": 23.7275
-    },
-    {
-        
-        "city_id": 2,
-        "city": "Thessaloniki",
-        "country": "Greece",
-        "latitude": 40.6401,
-        "longitude": 22.9444
+# Cities configuration
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+CITIES_CONFIG_PATH = PROJECT_ROOT / "config" / "cities.json"
 
-    }
-]
+def load_cities(config_path):
+    """
+    Loads city configuration from a JSON file.
+
+    Args:
+        config_path: Path to the JSON file containing city definitions.
+
+    Returns:
+        A non-empty list of city configuration dictionaries.
+
+    Raises:
+        ValueError: If the JSON does not contain a non-empty list.
+    """
+    with open(config_path, "r", encoding="utf-8") as file:
+        cities = json.load(file)
+
+    if not isinstance(cities, list):
+        raise ValueError("City configuration must be a list")
+
+    if not cities:
+        raise ValueError("City configuration list must not be empty")
+
+    return cities
 
 def build_url(city, hourly, base_prefix):
     """
@@ -258,6 +267,9 @@ def ingest_city(
 
 def main():
 
+    # Load cities
+    cities = load_cities(CITIES_CONFIG_PATH)
+
     # Generate UUID run id
     run_id = str(uuid.uuid4())
     run_started_at_utc = datetime.now(timezone.utc)
@@ -277,7 +289,7 @@ def main():
         database = client[DATABASE_NAME]
         raw_collection = database[RAW_COLLECTION_NAME]
         ingestion_run_collection = database[INGESTION_RUNS_COLLECTION_NAME]
-        for city in CITIES:
+        for city in cities:
             city_ingestion_succeeded = False
             last_error = None
             attempts_made = 0
@@ -362,7 +374,7 @@ def main():
 
         # Run status
 
-        if successful_ingestions == len(CITIES):
+        if successful_ingestions == len(cities):
             run_status = "completed"
         elif successful_ingestions > 0:
             run_status = "partial_failure"
@@ -380,7 +392,7 @@ def main():
             "status": run_status,
 
             "counts": {
-                "cities_intended": len(CITIES),
+                "cities_intended": len(cities),
                 "successful_ingestions": successful_ingestions,
                 "failed_ingestions": len(failed_cities),
             },
