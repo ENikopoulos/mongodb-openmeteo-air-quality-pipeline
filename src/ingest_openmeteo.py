@@ -4,9 +4,11 @@ import json
 from datetime import datetime, timezone
 import uuid
 from pymongo import MongoClient
+from pymongo.errors import PyMongoError
 import os
 from dotenv import load_dotenv
 import time
+from urllib.error import HTTPError, URLError
 
 # Requested hourly variables
 HOURLY_VARIABLES = [
@@ -215,15 +217,42 @@ def main():
                     city_ingestion_succeeded = True
                     break
                 
-                except Exception as error:
+                except HTTPError as error:
                     last_error = error
+                    code = error.code
+
                     print(
-                        f"Attempt {attempt} failed for "
-                        f"{city['city']}: {error}"
-                    )
+                        f"HTTP request failed with status {code} for "
+                        f"{city['city']}: {error.reason}"
+                        )
+
+                    if code == 429 or 500 <= code < 600:
+                        if attempt < MAX_ATTEMPTS:
+                            print(f"Retrying {city['city']}...")
+                            time.sleep(2)
+                    else:
+                        break
+
+                except (URLError, TimeoutError) as error:
+                    last_error = error
+
+                    print(
+                        f"Network error for {city['city']}: {error}"
+                        )
+
                     if attempt < MAX_ATTEMPTS:
                         print(f"Retrying {city['city']}...")
                         time.sleep(2)
+
+                except PyMongoError as error:
+                    last_error = error
+                    print(f"MongoDB operation failed for {city['city']}: {error}")
+                    break
+
+                except Exception as error:
+                    last_error = error
+                    print(f"Unexpected error for {city['city']}: {error}")
+                    break
             if not city_ingestion_succeeded:
                 failed_cities.append(
                     {
@@ -280,9 +309,17 @@ def main():
         }
 
         # Add run summary into ingestion_runs
-        inserted_summary = ingestion_run_collection.insert_one(run_summary)
-        print(f"Inserted run summary ID = {inserted_summary.inserted_id}")
+        try:
+            inserted_summary = ingestion_run_collection.insert_one(run_summary)
+            print(f"Inserted run summary ID = {inserted_summary.inserted_id}")
 
+        except PyMongoError as error:
+            print(
+                f"Ingestion run summary could not be stored. "
+                f"Run id: {run_id} "
+                f"Database error: {error}"
+                )
+            
         print("\nIngestion summary:")
         print(run_summary)
 
