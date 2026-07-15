@@ -64,6 +64,65 @@ def fetch_response(request_url):
         api_response = json.loads(response_body)
     return api_response
 
+def validate_api_response(api_response, required_variables):
+    """
+    Validates the basic structure of an Open-Meteo air-quality API response.
+
+    Confirms that the response contains a non-empty hourly timestamp list and
+    that every requested hourly variable exists as a list with the same number
+    of values as the timestamp list.
+
+    Args:
+        api_response: Parsed JSON response returned by the Open-Meteo API.
+        required_variables: Hourly variable names expected in the response.
+
+    Raises:
+        ValueError: If the API reports an error or the response structure is
+        missing, invalid, empty, or inconsistent.
+    """
+    if not isinstance(api_response, dict):
+        raise ValueError("API response must be a dictionary")
+
+    if api_response.get("error") is True:
+        reason = api_response.get("reason", "Unknown API error")
+        raise ValueError(f"API returned an error: {reason}")
+
+    hourly = api_response.get("hourly")
+
+    if not isinstance(hourly, dict):
+        raise ValueError(
+            "API response does not contain a valid hourly section"
+        )
+
+    time_values = hourly.get("time")
+
+    if not isinstance(time_values, list) or not time_values:
+        raise ValueError("hourly.time must be a non-empty list")
+
+    missing_variables = set(required_variables) - set(hourly.keys())
+
+    if missing_variables:
+        raise ValueError(
+            f"Missing hourly variables: {sorted(missing_variables)}"
+        )
+
+    expected_count = len(time_values)
+
+    for variable in required_variables:
+        variable_values = hourly[variable]
+
+        if not isinstance(variable_values, list):
+            raise ValueError(
+                f"Hourly variable '{variable}' must be a list"
+            )
+
+        if len(variable_values) != expected_count:
+            raise ValueError(
+                f"Hourly variable '{variable}' has "
+                f"{len(variable_values)} values; "
+                f"expected {expected_count}"
+            )
+        
 def build_raw_document(
         city, api_response, run_id, run_started_at_utc, ingested_at_utc
         ):
@@ -144,6 +203,13 @@ def ingest_city(
 
     # Fetch api response
     api_response = fetch_response(request_url)
+
+    # Validate api response
+    validate_api_response(
+        api_response, 
+        HOURLY_VARIABLES
+    )
+    
     ingested_at_utc = datetime.now(timezone.utc)
 
     # Build the raw document
@@ -244,6 +310,14 @@ def main():
                         print(f"Retrying {city['city']}...")
                         time.sleep(2)
 
+                except ValueError as error:
+                    last_error = error
+                    print(
+                        f"Response validation failed for "
+                        f"{city['city']}: {error}"
+                    )
+                    break
+
                 except PyMongoError as error:
                     last_error = error
                     print(f"MongoDB operation failed for {city['city']}: {error}")
@@ -275,7 +349,7 @@ def main():
 
         if successful_ingestions == len(CITIES):
             run_status = "completed"
-        elif successful_ingestions > 0 and successful_ingestions < len(CITIES):
+        elif successful_ingestions > 0:
             run_status = "partial_failure"
         else:
             run_status = "failed"
