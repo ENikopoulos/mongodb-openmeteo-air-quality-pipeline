@@ -181,6 +181,7 @@ def main():
 
     successful_ingestions = 0
     failed_cities = []
+    successful_cities = []
 
     # Print run_id and start time
     print(
@@ -191,7 +192,8 @@ def main():
     client = MongoClient(uri)
     try:
         database = client["openmeteo_air_quality"]
-        collection = database["raw_responses"]
+        raw_collection = database["raw_responses"]
+        ingestion_run_collection = database["ingestion_runs"]
         for city in CITIES:
             city_ingestion_succeeded = False
             last_error = None
@@ -204,7 +206,7 @@ def main():
                 try:
                     ingest_city(
                         city,
-                        collection,
+                        raw_collection,
                         run_id,
                         run_started_at_utc,
                     )
@@ -231,18 +233,55 @@ def main():
                         "attempts_made": attempts_made,
                     }
                 )
+            else:
+                successful_cities.append(
+                    {
+                        "city_id": city["city_id"],
+                        "city": city["city"],
+                        "attempts_made": attempts_made,
+                    }
+                )
 
+        # Run status
+
+        if successful_ingestions == len(CITIES):
+            run_status = "completed"
+        elif successful_ingestions > 0 and successful_ingestions < len(CITIES):
+            run_status = "partial_failure"
+        else:
+            run_status = "failed"
+        
         # Summary
         run_completed_at_utc = datetime.now(timezone.utc)
         run_summary = {
             "run_id": run_id,
+
             "run_started_at_utc": run_started_at_utc,
             "run_completed_at_utc": run_completed_at_utc,
-            "cities_intended": len(CITIES),
-            "successful_ingestions": successful_ingestions,
-            "failed_ingestions": len(failed_cities),
-            "failed_cities": failed_cities
+
+            "status": run_status,
+
+            "counts": {
+                "cities_intended": len(CITIES),
+                "successful_ingestions": successful_ingestions,
+                "failed_ingestions": len(failed_cities),
+            },
+
+            "successful_cities": successful_cities,
+
+            "failed_cities": failed_cities,
+
+            "request_config": {
+                "hourly_variables": HOURLY_VARIABLES,
+                "past_days": 2,
+                "forecast_days": 1,
+                "timezone": "UTC"
+            },
         }
+
+        # Add run summary into ingestion_runs
+        inserted_summary = ingestion_run_collection.insert_one(run_summary)
+        print(f"Inserted run summary ID = {inserted_summary.inserted_id}")
 
         print("\nIngestion summary:")
         print(run_summary)
