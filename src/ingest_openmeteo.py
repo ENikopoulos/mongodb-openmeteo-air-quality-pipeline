@@ -10,15 +10,29 @@ from dotenv import load_dotenv
 import time
 from urllib.error import HTTPError, URLError
 
-# Requested hourly variables
+# API configuration
+AIR_QUALITY_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
+
 HOURLY_VARIABLES = [
     "european_aqi",
     "pm10",
     "pm2_5",
-    "nitrogen_dioxide"
+    "nitrogen_dioxide",
 ]
 
-AIR_QUALITY_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
+API_TIMEZONE = "UTC"
+PAST_DAYS = 2
+FORECAST_DAYS = 1
+REQUEST_TIMEOUT_SECONDS = 30
+
+# MongoDB configuration
+DATABASE_NAME = "openmeteo_air_quality"
+RAW_COLLECTION_NAME = "raw_responses"
+INGESTION_RUNS_COLLECTION_NAME = "ingestion_runs"
+
+# Retry configuration
+MAX_ATTEMPTS = 3
+RETRY_DELAY_SECONDS = 2
 
 # Cities list
 CITIES = [
@@ -49,9 +63,9 @@ def build_url(city, hourly, base_prefix):
         "latitude": city["latitude"],
         "longitude": city["longitude"],
         "hourly": ",".join(hourly),
-        "timezone": "UTC",
-        "forecast_days": 1,
-        "past_days": 2
+        "timezone": API_TIMEZONE,
+        "forecast_days": FORECAST_DAYS,
+        "past_days": PAST_DAYS
     }
     return base_prefix + "?" + urllib.parse.urlencode(params, encoding="utf-8")
 
@@ -59,7 +73,10 @@ def fetch_response(request_url):
     """
     Fetches the Open-Meteo air_quality API response.
     """
-    with urllib.request.urlopen(request_url, timeout=30) as response:
+    with urllib.request.urlopen(
+        request_url, 
+        timeout=REQUEST_TIMEOUT_SECONDS
+    ) as response:
         response_body = response.read().decode("utf-8")
         api_response = json.loads(response_body)
     return api_response
@@ -146,9 +163,9 @@ def build_raw_document(
         "request": {
             "endpoint": AIR_QUALITY_URL,
             "hourly_variables": HOURLY_VARIABLES,
-            "timezone": "UTC",
-            "forecast_days": 1,
-            "past_days": 2
+            "timezone": API_TIMEZONE,
+            "forecast_days": FORECAST_DAYS,
+            "past_days": PAST_DAYS
         },
 
         "ingestion_metadata": {
@@ -241,8 +258,6 @@ def ingest_city(
 
 def main():
 
-    MAX_ATTEMPTS = 3
-
     # Generate UUID run id
     run_id = str(uuid.uuid4())
     run_started_at_utc = datetime.now(timezone.utc)
@@ -259,9 +274,9 @@ def main():
     uri = create_mongo_uri()
     client = MongoClient(uri)
     try:
-        database = client["openmeteo_air_quality"]
-        raw_collection = database["raw_responses"]
-        ingestion_run_collection = database["ingestion_runs"]
+        database = client[DATABASE_NAME]
+        raw_collection = database[RAW_COLLECTION_NAME]
+        ingestion_run_collection = database[INGESTION_RUNS_COLLECTION_NAME]
         for city in CITIES:
             city_ingestion_succeeded = False
             last_error = None
@@ -295,7 +310,7 @@ def main():
                     if code == 429 or 500 <= code < 600:
                         if attempt < MAX_ATTEMPTS:
                             print(f"Retrying {city['city']}...")
-                            time.sleep(2)
+                            time.sleep(RETRY_DELAY_SECONDS)
                     else:
                         break
 
@@ -308,7 +323,7 @@ def main():
 
                     if attempt < MAX_ATTEMPTS:
                         print(f"Retrying {city['city']}...")
-                        time.sleep(2)
+                        time.sleep(RETRY_DELAY_SECONDS)
 
                 except ValueError as error:
                     last_error = error
@@ -376,9 +391,9 @@ def main():
 
             "request_config": {
                 "hourly_variables": HOURLY_VARIABLES,
-                "past_days": 2,
-                "forecast_days": 1,
-                "timezone": "UTC"
+                "past_days": PAST_DAYS,
+                "forecast_days": FORECAST_DAYS,
+                "timezone": API_TIMEZONE
             },
         }
 
