@@ -30,20 +30,6 @@ def main():
     try:
         client.admin.command("ping")
         print("Successful Connection")
-         # Database, collection and data
-        data = {
-                "city": "Athens",
-                "european_aqi": 65,
-                "measurement_timestamp": "tmstamp",
-                "source": "openmeteo"
-            }
-        database = client["learning_db"]
-        collection = database["air_quality_test"]
-        insert_result = collection.insert_one(data)
-        print(f"inserted id = {insert_result.inserted_id}")
-        retrieved_document = collection.find_one({"_id": insert_result.inserted_id})
-        print(retrieved_document)
-
     finally:
         client.close()
 

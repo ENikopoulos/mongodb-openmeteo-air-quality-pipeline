@@ -131,11 +131,9 @@ The local setup requires:
 ## Clone the repository
 
 ```bash
-git clone <https://github.com/ENikopoulos/mongodb-openmeteo-air-quality-pipeline>
-cd mongodb-learning-project
+git clone https://github.com/ENikopoulos/mongodb-openmeteo-air-quality-pipeline
+cd mongodb-openmeteo-air-quality-pipeline
 ```
-
-Replace `<repository-url>` with the GitHub repository URL.
 
 ## Create the Python environment
 
