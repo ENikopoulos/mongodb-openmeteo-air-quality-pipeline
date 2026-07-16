@@ -98,7 +98,7 @@ config/cities.json
 ## Project structure
 
 ```text
-mongodb-learning-project/
+mongodb-openmeteo-air-quality-pipeline/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml
