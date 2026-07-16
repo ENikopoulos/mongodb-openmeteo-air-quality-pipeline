@@ -13,7 +13,8 @@ from src.ingest_openmeteo import (
     FORECAST_DAYS,
     build_url,
     validate_api_response,
-    load_cities
+    load_cities,
+    determine_run_status
 )
 
 
@@ -195,3 +196,49 @@ def test_load_cities_with_wrong_top_level_type(tmp_path):
         match="City configuration must be a list"
     ):
         load_cities(config_path)
+
+
+# Run status tests
+def test_determine_run_status_success():
+    # Arrange: all intended ingestions succeeded
+    successful_ingestions = 12
+    intended_ingestions = 12
+
+    # Act: call the function and register the result
+    result = determine_run_status(
+        successful_ingestions,
+        intended_ingestions
+    )
+
+    # Assert: check if the result is "completed"
+    assert result == "completed"
+
+
+def test_determine_run_status_partial_failure():
+    # Arrange: one or more ingestions faied, but not all
+    successful_ingestions = 1
+    intended_ingestions = 12
+
+    # Act call the function and register the result
+    result = determine_run_status(
+        successful_ingestions,
+        intended_ingestions
+    )
+
+    # Assert check if the result is "partial_failure"
+    assert result == "partial_failure"
+
+
+def test_determine_run_status_failed():
+    # Arrange: no successful ingestions
+    successful_ingestions = 0
+    intended_ingestions = 12
+
+    # Act call the function and register the result
+    result = determine_run_status(
+        successful_ingestions,
+        intended_ingestions
+    )
+
+    # Assert check if the result is "failed"
+    assert result == "failed"

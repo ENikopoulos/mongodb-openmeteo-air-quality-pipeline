@@ -39,6 +39,7 @@ RETRY_DELAY_SECONDS = 2
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CITIES_CONFIG_PATH = PROJECT_ROOT / "config" / "cities.json"
 
+
 def load_cities(config_path):
     """
     Loads city configuration from a JSON file.
@@ -63,6 +64,7 @@ def load_cities(config_path):
 
     return cities
 
+
 def build_url(city, hourly, base_prefix):
     """
     Builds the request url for the Open-Meteo API for hourly
@@ -78,6 +80,7 @@ def build_url(city, hourly, base_prefix):
     }
     return base_prefix + "?" + urllib.parse.urlencode(params, encoding="utf-8")
 
+
 def fetch_response(request_url):
     """
     Fetches the Open-Meteo air_quality API response.
@@ -89,6 +92,7 @@ def fetch_response(request_url):
         response_body = response.read().decode("utf-8")
         api_response = json.loads(response_body)
     return api_response
+
 
 def validate_api_response(api_response, required_variables):
     """
@@ -149,6 +153,7 @@ def validate_api_response(api_response, required_variables):
                 f"expected {expected_count}"
             )
         
+
 def build_raw_document(
         city, api_response, run_id, run_started_at_utc, ingested_at_utc
         ):
@@ -189,6 +194,7 @@ def build_raw_document(
 
     return raw_document
 
+
 def create_mongo_uri():
     """
     Creates the MongoDB connection URI, loads the secrets from .env 
@@ -203,6 +209,7 @@ def create_mongo_uri():
     uri = f"mongodb://{root_username}:{root_password}@localhost:27017/?authSource=admin"
 
     return uri
+
 
 def ingest_city(
         city,
@@ -262,6 +269,13 @@ def ingest_city(
     }
 
 
+def determine_run_status(successful_ingestions, cities_intended):
+    if successful_ingestions == cities_intended:
+        return "completed"
+    elif successful_ingestions > 0:
+        return "partial_failure"
+    else:
+        return "failed"
     
 
 
@@ -374,13 +388,11 @@ def main():
 
         # Run status
 
-        if successful_ingestions == len(cities):
-            run_status = "completed"
-        elif successful_ingestions > 0:
-            run_status = "partial_failure"
-        else:
-            run_status = "failed"
-        
+        run_status = determine_run_status(
+            successful_ingestions,
+            len(cities)
+        )
+
         # Summary
         run_completed_at_utc = datetime.now(timezone.utc)
         run_summary = {
