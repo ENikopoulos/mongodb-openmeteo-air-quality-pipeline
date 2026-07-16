@@ -276,7 +276,42 @@ def determine_run_status(successful_ingestions, cities_intended):
         return "partial_failure"
     else:
         return "failed"
-    
+
+
+def build_run_summary(
+    run_id,
+    run_started_at_utc,
+    run_completed_at_utc,
+    run_status,
+    cities,
+    successful_cities,
+    failed_cities
+):
+    return {
+        "run_id": run_id,
+
+        "run_started_at_utc": run_started_at_utc,
+        "run_completed_at_utc": run_completed_at_utc,
+
+        "status": run_status,
+
+        "counts": {
+            "cities_intended": len(cities),
+            "successful_ingestions": len(successful_cities),
+            "failed_ingestions": len(failed_cities),
+        },
+
+        "successful_cities": successful_cities,
+
+        "failed_cities": failed_cities,
+
+        "request_config": {
+            "hourly_variables": HOURLY_VARIABLES,
+            "past_days": PAST_DAYS,
+            "forecast_days": FORECAST_DAYS,
+            "timezone": API_TIMEZONE
+        },
+    }
 
 
 def main():
@@ -395,31 +430,15 @@ def main():
 
         # Summary
         run_completed_at_utc = datetime.now(timezone.utc)
-        run_summary = {
-            "run_id": run_id,
-
-            "run_started_at_utc": run_started_at_utc,
-            "run_completed_at_utc": run_completed_at_utc,
-
-            "status": run_status,
-
-            "counts": {
-                "cities_intended": len(cities),
-                "successful_ingestions": successful_ingestions,
-                "failed_ingestions": len(failed_cities),
-            },
-
-            "successful_cities": successful_cities,
-
-            "failed_cities": failed_cities,
-
-            "request_config": {
-                "hourly_variables": HOURLY_VARIABLES,
-                "past_days": PAST_DAYS,
-                "forecast_days": FORECAST_DAYS,
-                "timezone": API_TIMEZONE
-            },
-        }
+        run_summary = build_run_summary(
+            run_id,
+            run_started_at_utc,
+            run_completed_at_utc,
+            run_status,
+            cities,
+            successful_cities,
+            failed_cities,
+        )
 
         # Add run summary into ingestion_runs
         try:

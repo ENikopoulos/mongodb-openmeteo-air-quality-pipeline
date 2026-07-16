@@ -1,6 +1,7 @@
 # Imports
 import json
 from urllib.parse import parse_qs, urlparse
+from datetime import datetime, timezone
 
 import pytest
 
@@ -14,8 +15,13 @@ from src.ingest_openmeteo import (
     build_url,
     validate_api_response,
     load_cities,
-    determine_run_status
+    determine_run_status,
+    build_run_summary
 )
+
+# Config
+TEST_START_TIMESTAMP = datetime(2026, 7, 16, 10, 0, tzinfo=timezone.utc)
+TEST_END_TIMESTAMP = datetime(2026, 7, 16, 10, 1, tzinfo=timezone.utc)
 
 
 def test_build_url_contains_expected_endpoint_and_parameters():
@@ -242,3 +248,60 @@ def test_determine_run_status_failed():
 
     # Assert check if the result is "failed"
     assert result == "failed"
+
+
+# Check summary creation function
+def test_build_run_summary_completed():
+    # Arrange: create run ID, timestamps, status, and city results
+    run_id = "test-run-id"
+    run_started_at_utc = TEST_START_TIMESTAMP
+    run_completed_at_utc = TEST_END_TIMESTAMP
+    run_status = "completed"
+
+    cities = [
+        {
+            "city_id": 1,
+            "city": "Athens",
+            "country": "Greece",
+            "latitude": 23.3332,
+            "longitude": 43.574,
+        }
+    ]
+
+    successful_cities = [
+        {
+            "city_id": 1,
+            "city": "Athens",
+            "attempts_made": 1,
+        }
+    ]
+
+    failed_cities = []
+
+    # Act: call create summary function
+    test_summary = build_run_summary(
+        run_id,
+        run_started_at_utc,
+        run_completed_at_utc,
+        run_status,
+        cities,
+        successful_cities,
+        failed_cities,
+    )
+
+    # Assert: test summary values
+    assert test_summary["run_id"] == run_id
+    assert test_summary["status"] == "completed"
+    assert test_summary["counts"]["cities_intended"] == 1
+    assert test_summary["counts"]["successful_ingestions"] == 1
+    assert test_summary["counts"]["failed_ingestions"] == 0
+    assert test_summary["successful_cities"] == successful_cities
+    assert test_summary["failed_cities"] == failed_cities
+    assert test_summary["run_started_at_utc"] == TEST_START_TIMESTAMP
+    assert test_summary["run_completed_at_utc"] == TEST_END_TIMESTAMP
+    assert test_summary["request_config"] == {
+        "hourly_variables": HOURLY_VARIABLES,
+        "past_days": PAST_DAYS,
+        "forecast_days": FORECAST_DAYS,
+        "timezone": API_TIMEZONE,
+    }
