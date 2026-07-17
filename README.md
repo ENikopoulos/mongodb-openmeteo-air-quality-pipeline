@@ -521,6 +521,7 @@ The current focused tests cover:
 * Ingestion run-status determination
 * Run-summary document construction
 * Terminal run-summary output
+* Raw MongoDB document construction
 
 The unit tests use controlled fake inputs and temporary files. They do not require:
 

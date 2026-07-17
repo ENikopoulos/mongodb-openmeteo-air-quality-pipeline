@@ -18,6 +18,7 @@ from src.ingest_openmeteo import (
     determine_run_status,
     build_run_summary,
     print_run_summary,
+    build_raw_document,
 )
 
 # Config
@@ -354,3 +355,63 @@ def test_print_run_summary_function(capsys):
     assert "Intended city count: 1" in captured.out
     assert "Failed ingestions: 0" in captured.out
     assert "Timezone: UTC" in captured.out
+
+
+# Test build_raw_document function
+def test_build_raw_document():
+    # Arrange: create test deterministic inputs
+    run_id = "test_run_id"
+    run_started_at_utc = TEST_START_TIMESTAMP
+    ingested_at_utc = TEST_END_TIMESTAMP
+
+    city = {
+        "city_id": 1,
+        "city": "Athens",
+        "country": "Greece",
+        "latitude": 37.9838,
+        "longitude": 23.7275
+    }
+
+    fake_api_response = {
+        "hourly": {
+            "time": [
+                "2026-07-15T00:00",
+                "2026-07-15T01:00",
+            ],
+            "european_aqi": [42, 45],
+            "pm10": [18.2, 19.1],
+            "pm2_5": [9.4, 10.0],
+            "nitrogen_dioxide": [21.7, 23.3],
+        }
+    }
+
+    # Act: call the function
+    result = build_raw_document(
+        city,
+        fake_api_response,
+        run_id,
+        run_started_at_utc,
+        ingested_at_utc,
+    )
+
+    # Assert:
+    assert result["run_id"] == run_id
+    assert result["raw_payload"] == fake_api_response
+    assert result["city"] == {
+        "city_id": 1,
+        "city": "Athens",
+        "country": "Greece",
+        "requested_latitude": 37.9838,
+        "requested_longitude": 23.7275,
+    }
+    assert result["ingestion_metadata"]["run_started_at_utc"] == TEST_START_TIMESTAMP
+    assert result["ingestion_metadata"]["ingested_at_utc"] == TEST_END_TIMESTAMP
+    assert result["request"] == {
+        "endpoint": AIR_QUALITY_URL,
+        "hourly_variables": HOURLY_VARIABLES,
+        "timezone": API_TIMEZONE,
+        "forecast_days": FORECAST_DAYS,
+        "past_days": PAST_DAYS,
+    }
+    assert result["ingestion_metadata"]["source"] == "openmeteo"
+    assert result["ingestion_metadata"]["status"] == "ingest_complete"
