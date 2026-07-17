@@ -518,6 +518,9 @@ The current focused tests cover:
 * Valid city configuration loading
 * Empty city configuration
 * Invalid top-level city configuration
+* Ingestion run-status determination
+* Run-summary document construction
+* Terminal run-summary output
 
 The unit tests use controlled fake inputs and temporary files. They do not require:
 
