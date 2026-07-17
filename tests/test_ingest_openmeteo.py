@@ -16,7 +16,8 @@ from src.ingest_openmeteo import (
     validate_api_response,
     load_cities,
     determine_run_status,
-    build_run_summary
+    build_run_summary,
+    print_run_summary,
 )
 
 # Config
@@ -305,3 +306,51 @@ def test_build_run_summary_completed():
         "forecast_days": FORECAST_DAYS,
         "timezone": API_TIMEZONE,
     }
+
+
+# Test print_run_summary function
+def test_print_run_summary_function(capsys):
+    # Arrange: Create a run_summary
+    run_summary = {
+        "run_id": "test-run-id",
+        "run_started_at_utc": TEST_START_TIMESTAMP,
+        "run_completed_at_utc": TEST_END_TIMESTAMP,
+        "status": "completed",
+
+        "counts": {
+            "cities_intended": 1,
+            "successful_ingestions": 1,
+            "failed_ingestions": 0,
+        },
+
+        "successful_cities": [
+            {
+                "city_id": 1,
+                "city": "Athens",
+                "attempts_made": 1,
+            }
+        ],
+
+        "failed_cities": [],
+
+        "request_config": {
+            "hourly_variables": HOURLY_VARIABLES,
+            "past_days": PAST_DAYS,
+            "forecast_days": FORECAST_DAYS,
+            "timezone": API_TIMEZONE,
+        },
+    }
+
+    # Act: call function and capture with capsys
+    print_run_summary(run_summary)
+    captured = capsys.readouterr()
+
+    # Assert: check if important lines are in captured output
+    assert "Run with run_id: test-run-id" in captured.out
+    assert f"Run started at: {TEST_START_TIMESTAMP}" in captured.out
+    assert f"Run completed at: {TEST_END_TIMESTAMP}" in captured.out
+    assert "Run status: completed" in captured.out
+    assert "Successful ingestions: 1" in captured.out
+    assert "Intended city count: 1" in captured.out
+    assert "Failed ingestions: 0" in captured.out
+    assert "Timezone: UTC" in captured.out

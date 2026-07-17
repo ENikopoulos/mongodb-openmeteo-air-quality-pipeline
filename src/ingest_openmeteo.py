@@ -314,6 +314,26 @@ def build_run_summary(
     }
 
 
+def print_run_summary(run_summary):
+    print(
+        f"Run Summary:\n"
+        f"\tRun with run_id: {run_summary['run_id']}\n"
+        f"\tRun started at: {run_summary['run_started_at_utc']}\n"
+        f"\tRun completed at: {run_summary['run_completed_at_utc']}\n"
+        f"\tRun status: {run_summary['status']}\n"
+        f"\tIntended city count: {run_summary['counts']['cities_intended']}\n"
+        f"\tSuccessful ingestions: {run_summary['counts']['successful_ingestions']}\n"
+        f"\tFailed ingestions: {run_summary['counts']['failed_ingestions']}\n"
+        f"\tSuccessful cities: {run_summary['successful_cities']}\n"
+        f"\tFailed cities: {run_summary['failed_cities']}\n"
+        f"Requested Configuration:\n"
+        f"\tHourly: {run_summary['request_config']['hourly_variables']}\n"
+        f"\tPast days: {run_summary['request_config']['past_days']}\n"
+        f"\tForecast days: {run_summary['request_config']['forecast_days']}\n"
+        f"\tTimezone: {run_summary['request_config']['timezone']}"
+    )
+
+
 def main():
 
     # Load cities
@@ -452,8 +472,8 @@ def main():
                 f"Database error: {error}"
                 )
             
-        print("\nIngestion summary:")
-        print(run_summary)
+        # Print run summary
+        print_run_summary(run_summary)
 
     finally:
         client.close()
