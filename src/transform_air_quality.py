@@ -7,11 +7,11 @@ from pyspark.sql.window import Window
 
 
 # Constants
-OUTPUT_PATH = "data/silver/air_quality_measurements/"
-
+SILVER_PATH = "data/silver/air_quality_measurements"
+EXPECTED_MEASUREMENTS_PER_RESPONSE = 72
 
 # Load environment
-def environ_load():
+def load_mongo_credentials():
     load_dotenv()
     root_username = quote_plus(os.environ["MONGO_ROOT_USERNAME"])
     root_password = quote_plus(os.environ["MONGO_ROOT_PASSWORD"])
@@ -34,7 +34,7 @@ def create_spark_session(uri):
     return (
         SparkSession
         .builder
-        .appName("SparkTransform")
+        .appName("AirQualitySilverTransform")
         .config("spark.sql.session.timeZone", "UTC")
         .config("spark.mongodb.read.connection.uri", uri)
         .config("spark.mongodb.read.database", "openmeteo_air_quality")
@@ -62,10 +62,9 @@ def select_source_fields(raw_df):
     )
 
 
-# Check the length o each array here we expect 72 elements since we get 2 past days and one forecast day
-def get_distinct_array_lengths(selected_fields):
-
-    return (
+# Validate measurement array lengths
+def validate_measurement_array_lengths(selected_fields):
+    array_length_issues = (
         selected_fields
         .select(
             F.size("time_array").alias("time_count"),
@@ -73,10 +72,29 @@ def get_distinct_array_lengths(selected_fields):
             F.size("pm10_array").alias("pm10_count"),
             F.size("pm2_5_array").alias("pm2_5_count"),
             F.size("nitrogen_dioxide_array").alias("nitrogen_dioxide_count")
+        ).filter(
+            (F.col("european_aqi_count") != F.col("time_count"))
+            | (F.col("pm10_count") != F.col("time_count"))
+            | (F.col("pm2_5_count") != F.col("time_count"))
+            | (F.col("nitrogen_dioxide_count") != F.col("time_count"))
+            | (F.col("time_count") != EXPECTED_MEASUREMENTS_PER_RESPONSE)
+            | (F.col("time_count").isNull())
+            | (F.col("european_aqi_count").isNull())
+            | (F.col("pm10_count").isNull())
+            | (F.col("pm2_5_count").isNull())
+            | (F.col("nitrogen_dioxide_count").isNull())
         )
-        .distinct()
     )
-    
+
+    issue_count = array_length_issues.count()
+
+    if issue_count > 0:
+        raise RuntimeError(
+            f"Issues found in {issue_count} source array-length records."
+        )
+
+    print("Measurement array-length validation passed.")
+
 
 # Zip array elements into groups for each timestamp
 def zip_measurement_arrays(selected_fields):
@@ -137,7 +155,7 @@ def add_timestamp_validity_flag(timestamp_fields):
     )
 
 
-# Validation Flags for measurement parameters
+# Validation flags for measurement parameters
 def add_measurement_validity_flags(timestamp_validated):
     return timestamp_validated.withColumns({
         "is_valid_european_aqi": (
@@ -209,6 +227,7 @@ def deduplicate_measurements(measurement_validated):
         "deduplication_rank"
     )
 
+    # Retain invalid timestamp rows for data-quality investigation.
     invalid_timestamp_rows = measurement_validated.filter(
         ~F.col("is_valid_measurement_timestamp")
     )
@@ -247,10 +266,58 @@ def write_silver_parquet(silver_measurements, output_path):
         mode="overwrite"
     )
 
+
+# Summarize duplicate measurements
+def summarize_duplicate_measurement_keys(duplicate_keys):
+    return duplicate_keys.agg(
+        F.count("*").alias("duplicate_key_groups"),
+        F.sum(F.col("record_count") - 1).alias("redundant_rows"),
+        F.max("record_count").alias("max_records_per_key")
+    )
+
+
+# Validate no duplicates
+def validate_no_duplicate_measurement_keys(dataframe, label):
+    duplicate_keys = find_duplicate_measurement_keys(dataframe)
+    duplicate_group_count = duplicate_keys.count()
+
+    if duplicate_group_count > 0:
+        raise RuntimeError(
+            f"{label} contains {duplicate_group_count} duplicate key groups"
+        )
+
+    print(f"{label} duplicate-key validation passed")
+
+
+# Validate row counts
+def validate_row_counts_match(expected_count, actual_count, label):
+    if expected_count != actual_count:
+        raise RuntimeError(
+            f"{label} row-count validation failed: "
+            f"expected {expected_count}, found {actual_count}"
+        )
+
+    print(
+        f"{label} row-count validation passed: "
+        f"{actual_count} rows"
+    )
+
+
+# Summarize measurement validity
+def summarize_measurement_validity(measurement_validated):
+    return measurement_validated.groupBy(
+        "is_valid_measurement_timestamp",
+        "is_valid_european_aqi",
+        "is_valid_pm10",
+        "is_valid_pm2_5",
+        "is_valid_nitrogen_dioxide",
+    ).count()
+
+
 # Main
 def main():
-    # Load env variables
-    root_username, root_password = environ_load()
+    # Load mongo credentials
+    root_username, root_password = load_mongo_credentials()
 
     # Mongo URI creation
     uri = create_mongo_uri(root_username, root_password)
@@ -265,107 +332,65 @@ def main():
         raw_df = spark.read.format("mongodb").load()
 
         selected_fields = select_source_fields(raw_df)
-        selected_fields.printSchema()
 
-        array_lengths = get_distinct_array_lengths(selected_fields)
-        array_lengths.show(truncate=False)
+        validate_measurement_array_lengths(selected_fields)
 
         zipped_fields = zip_measurement_arrays(selected_fields)
-        zipped_fields.printSchema()
 
         exploded_fields = explode_measurements(zipped_fields)
-        exploded_fields.printSchema()
-        print(f"Exploded measurement rows: {exploded_fields.count()}")
 
         selected_measurements = select_measurement_fields(exploded_fields)
-        selected_measurements.printSchema()
-        selected_measurements.show(5, truncate=False)
 
         timestamp_fields = add_measurement_timestamp(selected_measurements)
-        
-        timestamp_preview = timestamp_fields.select(
-            F.col("measurement_timestamp_raw"),
-            F.col("measurement_timestamp")
-        )
-        timestamp_preview.printSchema()
-        timestamp_preview.show(5, truncate=False)
 
         timestamp_validated = add_timestamp_validity_flag(timestamp_fields)
-        timestamp_validated.groupBy(
-            "is_valid_measurement_timestamp"
-        ).count().show()
 
         measurement_validated = add_measurement_validity_flags(timestamp_validated)
-        measurement_validated.groupBy(
-            "is_valid_measurement_timestamp",
-            "is_valid_european_aqi",
-            "is_valid_pm10",
-            "is_valid_pm2_5",
-            "is_valid_nitrogen_dioxide",
-        ).count().show()
+        validity_summary = summarize_measurement_validity(
+            measurement_validated
+        )
+
+        validity_summary.show(truncate=False)
 
         duplicate_keys = find_duplicate_measurement_keys(measurement_validated)
-        duplicate_keys.orderBy(
-            F.col("record_count").desc()
-        ).show(10, truncate=False)
-        duplicate_summary = duplicate_keys.agg(
-            F.count("*").alias("duplicate_key_groups"),
-            F.sum(F.col("record_count") - 1).alias("redundant_rows"),
-            F.max("record_count").alias("max_records_per_key")
-        )
+
+        duplicate_summary = summarize_duplicate_measurement_keys(duplicate_keys)
 
         duplicate_summary.show(truncate=False)
 
-        print(f"Duplicate key groups: {duplicate_keys.count()}")
-
-        ranked_measurements = add_latest_record_rank(measurement_validated)
-        ranked_measurements.agg(
-            F.sum(
-                F.when(F.col("deduplication_rank") == 1, 1).otherwise(0)
-            ).alias("latest_rows"),
-            F.sum(
-                F.when(F.col("deduplication_rank") > 1, 1).otherwise(0)
-            ).alias("redundant_rows")
-        ).show()
-
-
         deduplicated_measurements = deduplicate_measurements(measurement_validated)
 
-        print(
-            f"Deduplicated rows: {deduplicated_measurements.count()}"
-        )
-
-        remaining_duplicate_keys = find_duplicate_measurement_keys(
-            deduplicated_measurements
-        )
-
-        print(
-            "Remaining duplicate key groups: "
-            f"{remaining_duplicate_keys.count()}"
+        validate_no_duplicate_measurement_keys(
+            deduplicated_measurements,
+            "Deduplicated Silver"
         )
 
         silver_measurements = select_silver_fields(deduplicated_measurements)
-        silver_measurements.printSchema()
-        silver_measurements.show(5, truncate=False)
+
+        silver_row_count = silver_measurements.count()
 
         # Write to silver
-        write_silver_parquet(silver_measurements, OUTPUT_PATH)
+        write_silver_parquet(silver_measurements, SILVER_PATH)
 
-        written_silver = spark.read.parquet(OUTPUT_PATH)
+        written_silver = spark.read.parquet(SILVER_PATH)
 
-        print(f"Written Silver rows: {written_silver.count()}")
+        written_row_count = written_silver.count()
 
-        written_duplicate_keys = find_duplicate_measurement_keys(written_silver)
+        validate_row_counts_match(
+            silver_row_count,
+            written_row_count,
+            "Silver read-back"
+        )
 
-        print(
-            "Written duplicate key groups: "
-            f"{written_duplicate_keys.count()}"
+        validate_no_duplicate_measurement_keys(
+            written_silver,
+            "Written Silver"
         )
 
     finally:
         if spark is not None:
             spark.stop()
-    
+
 
 if __name__ == "__main__":
     main()

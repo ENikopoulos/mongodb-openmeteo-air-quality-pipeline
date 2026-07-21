@@ -1,10 +1,13 @@
-# Open-Meteo Air Quality Ingestion with MongoDB
+# Open-Meteo Air Quality Pipeline with MongoDB and PySpark
 
-A personal learning and portfolio project for building a reliable Python ingestion layer with MongoDB.
+A personal learning and portfolio project for building an air-quality ingestion and transformation pipeline with Python, MongoDB, and PySpark.
 
-The project retrieves hourly air-quality data from the Open-Meteo Air Quality API, validates the response structure, and stores the complete unmodified API payload in MongoDB. Each execution also creates a permanent run-summary document for observability and troubleshooting.
+The project retrieves hourly air-quality data from the Open-Meteo Air Quality API, validates the response structure, and stores each complete, unmodified API payload in MongoDB. Each ingestion execution also creates a permanent run-summary document for observability and troubleshooting.
 
-The ingestion layer is intentionally kept separate from the future PySpark transformation layer.
+PySpark reads the raw MongoDB documents through the MongoDB Spark Connector and transforms the nested hourly arrays into validated, deduplicated measurement rows. The Silver dataset is stored as Parquet with one row per city and valid measurement timestamp, while records with invalid timestamps are retained for data-quality investigation.
+
+A second PySpark transformation creates a Gold daily summary with one row per city and date. It includes pollutant averages and maxima, daily completeness metrics, valid-measurement counts, data-quality flags, and the timestamp of the maximum European AQI.
+
 
 ## Project goals
 
@@ -20,8 +23,16 @@ This project is designed to practise:
 * Unit testing with pytest
 * Continuous integration with GitHub Actions
 * Docker-based local development
+* PySpark DataFrame transformations
+* Integrating MongoDB with PySpark through the Spark Connector
+* Array zipping and exploding
+* Data-quality flags
+* Window-based deduplication
+* Silver and Gold data modelling
+* Parquet persistence
+* Read-back validation
 
-## Current ingestion flow
+## Pipeline architecture
 
 ```text
 config/cities.json
@@ -36,9 +47,34 @@ Python ingestion script
         +--> MongoDB raw_responses
         |
         +--> MongoDB ingestion_runs
+
+MongoDB raw_responses
+        |
+        v
+PySpark Silver transformation
+        |
+        +--> Validate hourly array lengths
+        +--> Zip and explode hourly arrays
+        +--> Parse timestamps
+        +--> Add measurement-validity flags
+        +--> Deduplicate by city and timestamp
+        |
+        v
+data/silver/air_quality_measurements
+        |
+        v
+PySpark Gold transformation
+        |
+        +--> Aggregate measurements by city and date
+        +--> Calculate daily averages and maxima
+        +--> Calculate completeness and validity metrics
+        +--> Identify the timestamp of maximum European AQI
+        |
+        v
+data/gold/air_quality_summary
 ```
 
-For every configured city, the script:
+For every configured city, the ingestion script:
 
 1. Builds an Open-Meteo request URL.
 2. Fetches the API response.
@@ -48,6 +84,11 @@ For every configured city, the script:
 6. Tracks the success or failure of the city ingestion.
 
 After all cities have been processed, the script inserts one run-summary document describing the complete execution.
+
+The Silver transformation converts the raw hourly arrays into measurement-level rows, applies data-quality flags, and keeps the most recently ingested record for each valid `city_id + measurement_timestamp` key.
+
+The Gold transformation aggregates the Silver measurements into one daily row per `city_id + measurement_date`.
+
 
 ## Current features
 
@@ -66,6 +107,10 @@ After all cities have been processed, the script inserts one run-summary documen
 * Repeatable MongoDB index setup
 * Focused pytest unit tests
 * GitHub Actions CI for pushes and pull requests
+* Reading raw MongoDB documents with the MongoDB Spark Connector
+* Silver Parquet output with one row per city and valid measurement timestamp
+* Gold Parquet output with one daily row per city
+* Parquet row-count, schema, business-key, and duplicate-key validation
 
 ## Data source
 
@@ -108,6 +153,8 @@ mongodb-openmeteo-air-quality-pipeline/
 │   ├── __init__.py
 │   ├── check_connection.py
 │   ├── ingest_openmeteo.py
+│   ├── transform_air_quality.py
+│   ├── create_gold_daily_summary.py
 │   └── setup_indexes.py
 ├── tests/
 │   └── test_ingest_openmeteo.py
@@ -116,6 +163,15 @@ mongodb-openmeteo-air-quality-pipeline/
 ├── compose.yaml
 ├── README.md
 └── requirements.txt
+```
+
+### Generated data
+
+Generated locally and excluded from Git:
+
+```text
+data/silver/air_quality_measurements
+data/gold/air_quality_summary
 ```
 
 ## Prerequisites
@@ -127,6 +183,9 @@ The local setup requires:
 * Docker
 * Docker Compose
 * WSL2, Linux, or another compatible shell environment
+* Java 17
+* Apache Spark/PySpark
+* MongoDB Spark Connector package
 
 ## Clone the repository
 
@@ -267,6 +326,105 @@ successful_ingestions: 2
 failed_ingestions: 0
 ```
 
+## Run the Silver transformation
+
+The Silver transformation reads the raw API documents from the MongoDB `raw_responses` collection through the MongoDB Spark Connector.
+
+Run it from the repository root:
+
+```bash
+spark-submit \
+  --packages org.mongodb.spark:mongo-spark-connector_2.12:10.7.0 \
+  src/transform_air_quality.py
+```
+
+The transformation:
+
+1. Reads the raw MongoDB documents.
+2. Selects the city, ingestion, and hourly measurement fields.
+3. Validates that the timestamp and pollutant arrays contain the expected number of elements.
+4. Uses `arrays_zip()` to align each timestamp with its pollutant measurements.
+5. Explodes the arrays into individual measurement rows.
+6. Parses the measurement timestamp.
+7. Creates validity flags for timestamps and pollutant values.
+8. Identifies duplicate `city_id + measurement_timestamp` keys.
+9. Keeps the most recently ingested valid record for each key.
+10. Retains invalid-timestamp records for data-quality investigation.
+11. Writes the resulting Silver dataset as Parquet.
+12. Reads the Parquet output back and validates its row count and duplicate-key status.
+
+Silver output:
+
+```text
+data/silver/air_quality_measurements
+```
+
+The Silver grain is:
+
+```text
+One row per city_id and valid measurement_timestamp,
+plus retained invalid-timestamp records for investigation.
+```
+
+The normal validation output includes:
+
+* Hourly array-length validation
+* Measurement-validity summary
+* Pre-deduplication summary
+* Post-deduplication duplicate-key validation
+* Parquet read-back row-count validation
+* Persisted duplicate-key validation
+
+## Run the Gold transformation
+
+The Gold transformation reads the Silver Parquet dataset and produces one daily summary row per city.
+
+Run it from the repository root:
+
+```bash
+spark-submit src/create_gold_daily_summary.py
+```
+
+The transformation:
+
+1. Reads the Silver Parquet dataset.
+2. Derives `measurement_date` from `measurement_timestamp`.
+3. Filters out rows with invalid measurement timestamps.
+4. Aggregates measurements by `city_id + measurement_date`.
+5. Calculates average and maximum values for:
+
+   * European AQI
+   * PM10
+   * PM2.5
+   * Nitrogen dioxide
+6. Counts observed distinct hours.
+7. Counts valid daily measurements for each pollutant.
+8. Calculates the daily completeness percentage.
+9. Creates `is_complete_day` and `is_fully_valid_day` flags.
+10. Identifies the earliest timestamp at which the maximum daily European AQI occurred.
+11. Writes the Gold result as Parquet.
+12. Reads the output back and validates its row count, schema, business keys, and daily grain.
+
+Gold output:
+
+```text
+data/gold/air_quality_summary
+```
+
+The Gold grain is:
+
+```text
+One row per city_id and measurement_date.
+```
+
+The Gold read-back checks validate that:
+
+* Written and read-back row counts match.
+* Column names and data types match.
+* `city_id` and `measurement_date` are non-null.
+* No duplicate city-date keys exist.
+
+
 ## Error and retry behaviour
 
 The ingestion script distinguishes between several failure types.
@@ -310,9 +468,11 @@ Before insertion, the script verifies that:
 * Every requested variable is represented as a list.
 * Every requested variable has the same number of elements as the timestamp list.
 
-The validator checks structural usability only.
+The ingestion validator checks structural usability only.
 
-Measurement-quality rules, such as null handling, negative values, deduplication, and AQI-specific validation, are intentionally reserved for the future transformation layer.
+Measurement-level quality rules are applied in the Silver transformation. These include timestamp parsing, null and negative-value checks, hourly array-length validation, validity flags, and deduplication by city and measurement timestamp.
+
+Daily completeness and metric-validity rules are applied in the Gold transformation.
 
 ## MongoDB collections
 
@@ -579,16 +739,11 @@ docker compose down -v
 
 ## Future work
 
-The ingestion layer will be followed by a separate transformation stage.
+Possible next improvements include:
 
-Planned future work includes:
-
-* Reading raw MongoDB documents with PySpark
-* Flattening hourly arrays
-* Casting and validating measurements
-* Handling null and invalid values
-* Deduplicating measurements
-* Producing transformation-ready datasets
-* Adding analytical queries or downstream visualisation
-
-The PySpark transformation layer is intentionally outside the scope of the current ingestion implementation.
+* Adding focused unit tests for the Silver and Gold transformation helpers
+* Creating a separate rejected-record output for invalid timestamps
+* Making the expected ingestion window configurable across ingestion and transformation scripts
+* Adding analytical queries or a downstream visualisation
+* Adding transformation checks to CI without requiring a live MongoDB instance
+* Expanding the city configuration or supported air-quality measurements
