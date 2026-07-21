@@ -5,6 +5,11 @@ from dotenv import load_dotenv
 from pyspark.sql import SparkSession, functions as F
 from pyspark.sql.window import Window
 
+
+# Constants
+OUTPUT_PATH = "data/silver/air_quality_measurements/"
+
+
 # Load environment
 def environ_load():
     load_dotenv()
@@ -16,7 +21,7 @@ def environ_load():
 
 # Mongo connection URI
 def create_mongo_uri(root_username, root_password):
-    
+
     return (
         f"mongodb://{root_username}:{root_password}"
         "@127.0.0.1:27017/?authSource=admin"
@@ -25,12 +30,12 @@ def create_mongo_uri(root_username, root_password):
 
 # Spark Session
 def create_spark_session(uri):
-    
+
     return (
         SparkSession
         .builder
         .appName("SparkTransform")
-        .config("spark.sql.session.timezone", "UTC")
+        .config("spark.sql.session.timeZone", "UTC")
         .config("spark.mongodb.read.connection.uri", uri)
         .config("spark.mongodb.read.database", "openmeteo_air_quality")
         .config("spark.mongodb.read.collection", "raw_responses")
@@ -40,7 +45,7 @@ def create_spark_session(uri):
 
 # Select source field from raw_document
 def select_source_fields(raw_df):
-    
+
     return raw_df.select(
         F.col("run_id"),
         F.col("city.city_id").alias("city_id"),
@@ -59,7 +64,7 @@ def select_source_fields(raw_df):
 
 # Check the length o each array here we expect 72 elements since we get 2 past days and one forecast day
 def get_distinct_array_lengths(selected_fields):
-    
+
     return (
         selected_fields
         .select(
@@ -136,20 +141,28 @@ def add_timestamp_validity_flag(timestamp_fields):
 def add_measurement_validity_flags(timestamp_validated):
     return timestamp_validated.withColumns({
         "is_valid_european_aqi": (
-            (F.col("european_aqi").isNotNull())
-            & (F.col("european_aqi") >= 0)
+            F.when(
+                (F.col("european_aqi").isNotNull()) & (F.col("european_aqi") >= 0),
+                True
+            ).otherwise(False)
         ),
         "is_valid_pm10": (
-            (F.col("pm10").isNotNull())
-            & (F.col("pm10") >= 0)
+            F.when(
+                (F.col("pm10").isNotNull()) & (F.col("pm10") >= 0),
+                True
+            ).otherwise(False)
         ),
         "is_valid_pm2_5": (
-            (F.col("pm2_5").isNotNull())
-            & (F.col("pm2_5") >= 0)
+            F.when(
+                (F.col("pm2_5").isNotNull()) & (F.col("pm2_5") >= 0),
+                True
+            ).otherwise(False)
         ),
         "is_valid_nitrogen_dioxide": (
-            (F.col("nitrogen_dioxide").isNotNull())
-            & (F.col("nitrogen_dioxide") >= 0)
+            F.when(
+                (F.col("nitrogen_dioxide").isNotNull()) & (F.col("nitrogen_dioxide") >= 0),
+                True
+            ).otherwise(False)
         )
     })
 
@@ -226,6 +239,13 @@ def select_silver_fields(deduplicated_measurements):
         F.col("is_valid_nitrogen_dioxide"),
     )
 
+
+# Write data to silver in parquet
+def write_silver_parquet(silver_measurements, output_path):
+    silver_measurements.write.parquet(
+        output_path,
+        mode="overwrite"
+    )
 
 # Main
 def main():
@@ -327,6 +347,20 @@ def main():
         silver_measurements = select_silver_fields(deduplicated_measurements)
         silver_measurements.printSchema()
         silver_measurements.show(5, truncate=False)
+
+        # Write to silver
+        write_silver_parquet(silver_measurements, OUTPUT_PATH)
+
+        written_silver = spark.read.parquet(OUTPUT_PATH)
+
+        print(f"Written Silver rows: {written_silver.count()}")
+
+        written_duplicate_keys = find_duplicate_measurement_keys(written_silver)
+
+        print(
+            "Written duplicate key groups: "
+            f"{written_duplicate_keys.count()}"
+        )
 
     finally:
         if spark is not None:
