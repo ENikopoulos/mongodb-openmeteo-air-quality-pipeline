@@ -8,7 +8,6 @@ PySpark reads the raw MongoDB documents through the MongoDB Spark Connector and 
 
 A second PySpark transformation creates a Gold daily summary with one row per city and date. It includes pollutant averages and maxima, daily completeness metrics, valid-measurement counts, data-quality flags, and the timestamp of the maximum European AQI.
 
-
 ## Project goals
 
 This project is designed to practise:
@@ -89,7 +88,6 @@ The Silver transformation converts the raw hourly arrays into measurement-level 
 
 The Gold transformation aggregates the Silver measurements into one daily row per `city_id + measurement_date`.
 
-
 ## Current features
 
 * Local MongoDB environment using Docker Compose
@@ -105,8 +103,9 @@ The Gold transformation aggregates the Silver measurements into one daily row pe
 * Separate handling for MongoDB errors
 * Lightweight Open-Meteo response validation
 * Repeatable MongoDB index setup
-* Focused pytest unit tests
-* GitHub Actions CI for pushes and pull requests
+* Twenty-two focused pytest unit tests covering ingestion, Silver, and Gold logic
+* Shared session-scoped Spark fixture for transformation tests
+* GitHub Actions CI for pushes and pull requests using Python 3.12 and Java 17
 * Reading raw MongoDB documents with the MongoDB Spark Connector
 * Silver Parquet output with one row per city and valid measurement timestamp
 * Gold Parquet output with one daily row per city
@@ -157,7 +156,10 @@ mongodb-openmeteo-air-quality-pipeline/
 │   ├── create_gold_daily_summary.py
 │   └── setup_indexes.py
 ├── tests/
-│   └── test_ingest_openmeteo.py
+│   ├── conftest.py
+│   ├── test_ingest_openmeteo.py
+│   ├── test_transform_openmeteo.py
+│   └── test_create_gold_daily_summary.py
 ├── .env.example
 ├── .gitignore
 ├── compose.yaml
@@ -382,8 +384,10 @@ The Gold transformation reads the Silver Parquet dataset and produces one daily 
 Run it from the repository root:
 
 ```bash
-spark-submit src/create_gold_daily_summary.py
+python -m src.create_gold_daily_summary
 ```
+
+The module form keeps the internal `src` package imports consistent between normal execution and pytest.
 
 The transformation:
 
@@ -423,7 +427,6 @@ The Gold read-back checks validate that:
 * Column names and data types match.
 * `city_id` and `measurement_date` are non-null.
 * No duplicate city-date keys exist.
-
 
 ## Error and retry behaviour
 
@@ -669,24 +672,52 @@ Run all tests from the repository root:
 python -m pytest -q
 ```
 
-The current focused tests cover:
+The current suite contains 22 focused tests:
+
+* 13 ingestion tests
+* 5 Silver transformation tests
+* 4 Gold transformation tests
+
+The ingestion tests cover:
 
 * Open-Meteo URL construction
-* Valid API-response validation
+* Valid and invalid API-response structures
 * Missing hourly variables
 * Mismatched hourly-array lengths
-* Valid city configuration loading
-* Empty city configuration
-* Invalid top-level city configuration
+* City configuration validation
 * Ingestion run-status determination
 * Run-summary document construction
 * Terminal run-summary output
 * Raw MongoDB document construction
 
-The unit tests use controlled fake inputs and temporary files. They do not require:
+The Silver transformation tests cover:
+
+* Valid and invalid timestamp parsing
+* Timestamp-validity flags
+* Pollutant-validity flags for positive, negative, null, and zero values
+* Latest-record deduplication by city and measurement timestamp
+* Retention of invalid-timestamp records during deduplication
+
+The Gold transformation tests cover:
+
+* Daily averages, maxima, valid-measurement counts, and completeness metrics
+* Daily completeness and full-validity flags
+* Earliest timestamp selection when the maximum European AQI is tied
+* Null business-key validation
+* Duplicate business-key validation
+
+The Spark tests create small local DataFrames and share one session-scoped Spark fixture from:
+
+```text
+tests/conftest.py
+```
+
+The test suite does not require:
 
 * A live Open-Meteo request
 * A running MongoDB container
+* The MongoDB Spark Connector
+* Docker
 * Real credentials
 
 ## Continuous integration
@@ -702,18 +733,23 @@ It runs on:
 * Pushes
 * Pull requests
 
-The workflow:
+The workflow is named `Project Unit Tests` and runs on a fresh GitHub-hosted Ubuntu environment.
+
+It:
 
 1. Checks out the repository.
-2. Sets up Python 3.12.
-3. Installs the pinned dependencies.
-4. Runs:
+2. Sets up Java 17 for the Spark execution engine.
+3. Sets up Python 3.12 for the project modules and pytest.
+4. Installs the dependencies from `requirements.txt`.
+5. Runs:
 
 ```bash
 python -m pytest -q
 ```
 
-MongoDB and Docker services are not required for the current CI workflow because the tests are unit tests rather than integration tests.
+The CI tests import and execute focused transformation functions against small local Spark DataFrames. They do not run the complete ingestion, Silver, or Gold pipelines as command-line jobs.
+
+MongoDB, Docker, the Open-Meteo API, and the MongoDB Spark Connector are not required by the CI test suite.
 
 ## Stop the local environment
 
@@ -741,9 +777,8 @@ docker compose down -v
 
 Possible next improvements include:
 
-* Adding focused unit tests for the Silver and Gold transformation helpers
 * Creating a separate rejected-record output for invalid timestamps
 * Making the expected ingestion window configurable across ingestion and transformation scripts
+* Adding a focused unit test for hourly array-length validation
 * Adding analytical queries or a downstream visualisation
-* Adding transformation checks to CI without requiring a live MongoDB instance
 * Expanding the city configuration or supported air-quality measurements
