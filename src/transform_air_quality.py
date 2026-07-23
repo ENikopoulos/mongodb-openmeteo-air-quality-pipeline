@@ -5,10 +5,10 @@ from dotenv import load_dotenv
 from pyspark.sql import SparkSession, functions as F
 from pyspark.sql.window import Window
 
+from src.request_config import EXPECTED_MEASUREMENTS_PER_RESPONSE
 
 # Constants
 SILVER_PATH = "data/silver/air_quality_measurements"
-EXPECTED_MEASUREMENTS_PER_RESPONSE = 72
 
 # Load environment
 def load_mongo_credentials():

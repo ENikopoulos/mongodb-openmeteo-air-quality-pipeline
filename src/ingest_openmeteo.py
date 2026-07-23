@@ -11,6 +11,11 @@ import time
 from urllib.error import HTTPError, URLError
 from pathlib import Path
 
+from src.request_config import (
+    FORECAST_DAYS,
+    PAST_DAYS,
+)
+
 # API configuration
 AIR_QUALITY_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
 
@@ -22,8 +27,6 @@ HOURLY_VARIABLES = [
 ]
 
 API_TIMEZONE = "UTC"
-PAST_DAYS = 2
-FORECAST_DAYS = 1
 REQUEST_TIMEOUT_SECONDS = 30
 
 # MongoDB configuration

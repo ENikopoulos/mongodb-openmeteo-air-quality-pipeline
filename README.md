@@ -151,7 +151,9 @@ mongodb-openmeteo-air-quality-pipeline/
 ├── src/
 │   ├── __init__.py
 │   ├── check_connection.py
+│   ├── check_spark_connection.py
 │   ├── ingest_openmeteo.py
+│   ├── request_config.py
 │   ├── transform_air_quality.py
 │   ├── create_gold_daily_summary.py
 │   └── setup_indexes.py
@@ -159,6 +161,7 @@ mongodb-openmeteo-air-quality-pipeline/
 │   ├── conftest.py
 │   ├── test_ingest_openmeteo.py
 │   ├── test_transform_openmeteo.py
+│   ├── test_request_config.py
 │   └── test_create_gold_daily_summary.py
 ├── .env.example
 ├── .gitignore
@@ -672,11 +675,12 @@ Run all tests from the repository root:
 python -m pytest -q
 ```
 
-The current suite contains 22 focused tests:
+The current suite contains 23 focused tests:
 
 * 13 ingestion tests
 * 5 Silver transformation tests
 * 4 Gold transformation tests
+* 1 shared request-configuration test
 
 The ingestion tests cover:
 
@@ -705,6 +709,8 @@ The Gold transformation tests cover:
 * Earliest timestamp selection when the maximum European AQI is tied
 * Null business-key validation
 * Duplicate business-key validation
+
+The request-configuration test verifies that the expected hourly measurements per API response are derived from the configured past and forecast day window.
 
 The Spark tests create small local DataFrames and share one session-scoped Spark fixture from:
 
@@ -778,7 +784,6 @@ docker compose down -v
 Possible next improvements include:
 
 * Creating a separate rejected-record output for invalid timestamps
-* Making the expected ingestion window configurable across ingestion and transformation scripts
 * Adding a focused unit test for hourly array-length validation
 * Adding analytical queries or a downstream visualisation
 * Expanding the city configuration or supported air-quality measurements
