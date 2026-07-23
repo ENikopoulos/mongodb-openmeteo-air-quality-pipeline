@@ -1,14 +1,17 @@
 # Imports
 from datetime import datetime
 
+import pytest
 from pyspark.sql import functions as F
 
+from src.request_config import EXPECTED_MEASUREMENTS_PER_RESPONSE
 from src.transform_air_quality import (
     add_measurement_timestamp,
     add_timestamp_validity_flag,
     add_measurement_validity_flags,
     deduplicate_measurements,
     find_duplicate_measurement_keys,
+    validate_measurement_array_lengths,
 )
 
 
@@ -304,3 +307,90 @@ def test_deduplicate_measurements_retains_invalid_timestamps(spark):
     assert invalid_count == 2
 
     assert result_rows["new"]["european_aqi"] == 55.0
+
+
+# Test hourly array-length validator
+def test_validate_measurement_array_lengths_accepts_valid_lengths(spark):
+    # Arrange: create small DataFrame input
+    expected_length = EXPECTED_MEASUREMENTS_PER_RESPONSE
+    test_data = [
+        {
+            "time_array": [
+                f"t{index}"
+                for index in range(expected_length)
+            ],
+            "european_aqi_array": [22.0] * expected_length,
+            "pm10_array": [10.2] * expected_length,
+            "pm2_5_array": [5.7] * expected_length,
+            "nitrogen_dioxide_array": [23.5] * expected_length
+        }
+    ]
+
+    test_df = spark.createDataFrame(test_data)
+
+    # Act and assert: call function and we expect no error raised
+    validate_measurement_array_lengths(test_df)
+
+
+def test_validate_measurement_array_lengths_rejects_mismatched_lengths(spark):
+    # Arrange: create small DataFrame input
+    expected_length = EXPECTED_MEASUREMENTS_PER_RESPONSE
+    test_data = [
+        {
+            "time_array": [
+                f"t{index}"
+                for index in range(expected_length)
+            ],
+            "european_aqi_array": [22.0] * (expected_length - 1),
+            "pm10_array": [10.2] * expected_length,
+            "pm2_5_array": [5.7] * expected_length,
+            "nitrogen_dioxide_array": [23.5] * expected_length
+        }
+    ]
+
+    test_df = spark.createDataFrame(test_data)
+
+    # Act and assert
+    with pytest.raises(
+        RuntimeError,
+        match=r"Issues found in 1 source array-length records\.",
+    ):
+        validate_measurement_array_lengths(test_df)
+
+
+def test_validate_measurement_array_lengths_rejects_null_arrays(spark):
+    # Arrange: create small input DataFrame
+    expected_length = EXPECTED_MEASUREMENTS_PER_RESPONSE
+
+    test_data = [
+        {
+            "time_array": [
+                f"t{index}"
+                for index in range(expected_length)
+            ],
+            "european_aqi_array": [35.0] * expected_length,
+            "pm10_array": [22.0] * expected_length,
+            "pm2_5_array": [5.5] * expected_length,
+            "nitrogen_dioxide_array": [15.0] * expected_length
+        },
+
+        {
+            "time_array": [
+                f"t{index}"
+                for index in range(expected_length)
+            ],
+            "european_aqi_array": [35.0] * expected_length,
+            "pm10_array": [22.0] * expected_length,
+            "pm2_5_array": [5.5] * expected_length,
+            "nitrogen_dioxide_array": None
+        },
+    ]
+
+    test_df = spark.createDataFrame(test_data)
+
+    # Act and assert
+    with pytest.raises(
+        RuntimeError,
+        match=r"Issues found in 1 source array-length records\.",
+    ):
+        validate_measurement_array_lengths(test_df)

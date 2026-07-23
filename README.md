@@ -103,7 +103,7 @@ The Gold transformation aggregates the Silver measurements into one daily row pe
 * Separate handling for MongoDB errors
 * Lightweight Open-Meteo response validation
 * Repeatable MongoDB index setup
-* Twenty-two focused pytest unit tests covering ingestion, Silver, and Gold logic
+* Twenty-six focused pytest unit tests covering ingestion, configuration, Silver, and Gold logic
 * Shared session-scoped Spark fixture for transformation tests
 * GitHub Actions CI for pushes and pull requests using Python 3.12 and Java 17
 * Reading raw MongoDB documents with the MongoDB Spark Connector
@@ -675,10 +675,10 @@ Run all tests from the repository root:
 python -m pytest -q
 ```
 
-The current suite contains 23 focused tests:
+The current suite contains 26 focused tests:
 
 * 13 ingestion tests
-* 5 Silver transformation tests
+* 8 Silver transformation tests
 * 4 Gold transformation tests
 * 1 shared request-configuration test
 
@@ -701,6 +701,7 @@ The Silver transformation tests cover:
 * Pollutant-validity flags for positive, negative, null, and zero values
 * Latest-record deduplication by city and measurement timestamp
 * Retention of invalid-timestamp records during deduplication
+* Hourly array-length validation for valid, mismatched, and null arrays
 
 The Gold transformation tests cover:
 
@@ -784,6 +785,5 @@ docker compose down -v
 Possible next improvements include:
 
 * Creating a separate rejected-record output for invalid timestamps
-* Adding a focused unit test for hourly array-length validation
 * Adding analytical queries or a downstream visualisation
 * Expanding the city configuration or supported air-quality measurements
